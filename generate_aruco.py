@@ -186,6 +186,10 @@ def parse_args():
                         help="If given, two circular indentations will be made on the bottom of the box for magnets")
     parser.add_argument("--layer_height", type=float,
                         help="Layer height for the 3D printer, will be used for inset depth and groove depth")
+    parser.add_argument("--reference_square_height", type=float,
+                        help="Height of the reference square below zero (negative value)")
+    parser.add_argument("--generate_support", action="store_true",
+                        help="Generate a separate support STL file extending 0.4mm below the marker")
 
     return parser.parse_args()
 
@@ -236,9 +240,16 @@ def main():
             magnet_inset_radius = None
 
         if args.layer_height:
-            layer_height = args.layer_height / 10
+            layer_height = args.layer_height
         else:
             layer_height = get_user_input("Enter the layer height (mm)", float)
+
+        if args.reference_square_height:
+            reference_square_height = args.reference_square_height
+        else:
+            reference_square_height = None
+
+        generate_support = args.generate_support
 
     print(f"Aruco Dictionary: {marker_type}")
     aruco_img = generate_aruco_ocupancy_grid(marker_type, marker_id)
@@ -303,7 +314,67 @@ def main():
     # Add the dictionary name in the bottom
     obj = obj.faces("<Z").workplane().center(0.0, dist_to_indent*2).transformed(rotate=(0,0,180)).text(marker_type, card_margin*0.5, -layer_height, combine='cut')
 
+    # Add reference square if specified
+    if reference_square_height is not None:
+        print("Adding reference square")
+        # Calculate position outside the marker area
+        square_size = 0.002  # 0.002mm square (very tiny)
+        gap = 5  # 5mm gap from marker
+        x_pos = card_side/2 + gap
+        y_pos = card_side/2 + gap
+        
+        # Always create at least 2mm upward extension even when reference_square_height is 0
+        below_height = max(reference_square_height, 0)  # If 0 or positive, don't go below bottom
+        total_height = below_height + 2  # Always add 2mm upward extension
+        
+        # If below_height is 0, center is 1mm above bottom surface
+        # Otherwise, center is calculated to extend below and 2mm above
+        if below_height == 0:
+            z_center = -card_height + 1  # Center 1mm above bottom surface
+        else:
+            # Position square to extend from -card_height-below_height to -card_height+2
+            z_center = -card_height - below_height/2 + 1  # Adjust center to account for 2mm upward
+            
+        ref_square = cq.Workplane("XY").box(square_size, square_size, total_height)
+        ref_square = ref_square.translate((x_pos, y_pos, z_center))
+        obj = obj.union(ref_square)
+
     obj.val().exportStl(FILENAME+'.stl', ascii=True)
+
+    # Generate support STL if requested
+    if generate_support:
+        print("Generating support STL")
+        # Create a box with the same dimensions as the marker but only 0.4mm tall
+        support_height = 0.4
+        support = cq.Workplane("XY").box(card_side, card_side, support_height)
+        
+        # Position it 0.4mm below the bottom of the marker (-card_height - support_height/2)
+        support = support.translate((0, 0, -card_height - support_height/2))
+        
+        # Add the reference square to the support as well, if specified
+        if reference_square_height is not None:
+            # Calculate position outside the marker area (same as the main marker)
+            square_size = 0.002  # 0.002mm square (very tiny)
+            gap = 5  # 5mm gap from marker
+            x_pos = card_side/2 + gap
+            y_pos = card_side/2 + gap
+            
+            # Add the reference square using the same parameters
+            below_height = max(reference_square_height, 0)
+            total_height = below_height + 2
+            
+            if below_height == 0:
+                z_center = -card_height + 1
+            else:
+                z_center = -card_height - below_height/2 + 1
+                
+            ref_square = cq.Workplane("XY").box(square_size, square_size, total_height)
+            ref_square = ref_square.translate((x_pos, y_pos, z_center))
+            support = support.union(ref_square)
+        
+        # Export the support STL
+        support.val().exportStl(FILENAME+'_support.stl', ascii=True)
+        print(f"Support STL saved as {FILENAME}_support.stl")
 
 
 
