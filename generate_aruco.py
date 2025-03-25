@@ -1,4 +1,5 @@
 import argparse
+import os
 from typing import Tuple
 import cadquery.cqgi as cqgi
 import cadquery as cq
@@ -186,10 +187,12 @@ def parse_args():
                         help="If given, two circular indentations will be made on the bottom of the box for magnets")
     parser.add_argument("--layer_height", type=float,
                         help="Layer height for the 3D printer, will be used for inset depth and groove depth")
+    parser.add_argument("--support_layers", type=int,
+                        help="Number of support layers to generate")
     parser.add_argument("--reference_square_height", type=float,
                         help="Height of the reference square below zero (negative value)")
-    parser.add_argument("--generate_support", action="store_true",
-                        help="Generate a separate support STL file extending 0.4mm below the marker")
+    parser.add_argument("--output_dir", type=str,
+                        help="Output directory")
 
     return parser.parse_args()
 
@@ -198,7 +201,12 @@ def main():
 
     args = parse_args()
 
-    FILENAME = args.output
+    if args.output_dir:
+        FILENAME = os.path.join(args.output_dir, args.output)
+        SUPPORT_FILENAME = os.path.join(args.output_dir, 'support_'+args.output)
+    else:
+        FILENAME = args.output
+        SUPPORT_FILENAME = 'support_'+args.output
 
     if args.default_id:
         marker_type, marker_id = "DICT_4X4_50", args.default_id
@@ -249,7 +257,7 @@ def main():
         else:
             reference_square_height = None
 
-        generate_support = args.generate_support
+        support_layers = args.support_layers
 
     print(f"Aruco Dictionary: {marker_type}")
     aruco_img = generate_aruco_ocupancy_grid(marker_type, marker_id)
@@ -342,13 +350,13 @@ def main():
     obj.val().exportStl(FILENAME+'.stl', ascii=True)
 
     # Generate support STL if requested
-    if generate_support:
+    if support_layers > 0:
         print("Generating support STL")
         # Create a box with the same dimensions as the marker but only 0.4mm tall
-        support_height = 0.4
+        support_height = support_layers * layer_height
         support = cq.Workplane("XY").box(card_side, card_side, support_height)
         
-        # Position it 0.4mm below the bottom of the marker (-card_height - support_height/2)
+        # Position it below the bottom of the marker (-card_height - support_height/2)
         support = support.translate((0, 0, -card_height - support_height/2))
         
         # Add the reference square to the support as well, if specified
@@ -373,10 +381,10 @@ def main():
             support = support.union(ref_square)
         
         # Export the support STL
-        support.val().exportStl(FILENAME+'_support.stl', ascii=True)
-        print(f"Support STL saved as {FILENAME}_support.stl")
+        support.val().exportStl(SUPPORT_FILENAME+'.stl', ascii=True)
+        print(f"Support STL saved as {SUPPORT_FILENAME}.stl")
 
 
-
+1
 if __name__ == "__main__":
     main()
